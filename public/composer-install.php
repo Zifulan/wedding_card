@@ -155,11 +155,34 @@ elseif ($action === 'install'):
         echo "<pre style='background:#111;padding:12px;border-radius:8px;color:#c9a84c;margin-top:8px'>composer install --no-dev --optimize-autoloader\nzip -r vendor.zip vendor/</pre>";
         inf("Then upload vendor.zip via File Manager and extract it.");
     } else {
-        $phpBin = PHP_BINARY ?: 'php';
-        $cmd    = escapeshellarg($phpBin) . ' ' . escapeshellarg($pharPath)
-                . ' install --no-dev --optimize-autoloader --no-interaction --no-ansi 2>&1';
+        // Find the best CLI PHP binary (avoid web SAPI binary which Composer rejects)
+        $phpCandidates = [
+            '/usr/local/bin/php',       // cPanel default
+            '/usr/bin/php',
+            '/usr/local/php82/bin/php', // cPanel PHP 8.2 selector
+            '/usr/local/php83/bin/php',
+            '/opt/cpanel/ea-php82/root/usr/bin/php', // EasyApache4
+            '/opt/cpanel/ea-php83/root/usr/bin/php',
+            'php',                      // $PATH fallback
+        ];
+        $phpBin = 'php';
+        foreach ($phpCandidates as $candidate) {
+            [$v, $c] = shellRun("$candidate -r \"echo 'ok';\" 2>&1", $root);
+            if ($c === 0 && trim($v) === 'ok') {
+                $phpBin = $candidate;
+                break;
+            }
+        }
 
-        inf("Running: php composer.phar install --no-dev --optimize-autoloader");
+        // -d register_argc_argv=0  → bypasses Composer's non-CLI SAPI check
+        // -d allow_url_fopen=1     → needed to download packages
+        // -d memory_limit=512M     → composer needs RAM
+        $phpFlags = '-d register_argc_argv=0 -d memory_limit=512M -d allow_url_fopen=1';
+        $cmd = escapeshellarg($phpBin) . ' ' . $phpFlags . ' ' . escapeshellarg($pharPath)
+             . ' install --no-dev --optimize-autoloader --no-interaction --no-ansi 2>&1';
+
+        inf("PHP binary: $phpBin");
+        inf("Running: php $phpFlags composer.phar install --no-dev --optimize-autoloader");
         inf("Working dir: $root");
         flush(); ob_flush();
 
