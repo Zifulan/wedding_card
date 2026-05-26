@@ -253,10 +253,75 @@ elseif ($action === 'seed') {
     }
 }
 
-// 5. Write optimized config cache files manually
+// 5. Fix permissions + create missing directories
+elseif ($action === 'fixperms') {
+    $lines = [];
+    $dirs = [
+        ROOT . '/storage',
+        ROOT . '/storage/app',
+        ROOT . '/storage/app/public',
+        ROOT . '/storage/framework',
+        ROOT . '/storage/framework/cache',
+        ROOT . '/storage/framework/cache/data',
+        ROOT . '/storage/framework/sessions',
+        ROOT . '/storage/framework/testing',
+        ROOT . '/storage/framework/views',
+        ROOT . '/storage/logs',
+        ROOT . '/bootstrap/cache',
+    ];
+    foreach ($dirs as $dir) {
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+            $lines[] = ok("Created: " . str_replace(ROOT . '/', '', $dir));
+        }
+        if (@chmod($dir, 0755)) {
+            $lines[] = ok("chmod 755: " . str_replace(ROOT . '/', '', $dir));
+        } else {
+            $lines[] = err("Cannot chmod: " . str_replace(ROOT . '/', '', $dir) . " — do it manually in File Manager");
+        }
+    }
+    // Clear stale cache files
+    foreach ([ROOT . '/bootstrap/cache', ROOT . '/storage/framework/views', ROOT . '/storage/framework/cache/data'] as $dir) {
+        foreach (glob($dir . '/*.php') ?: [] as $f) { @unlink($f); }
+        foreach (glob($dir . '/*.cache') ?: [] as $f) { @unlink($f); }
+    }
+    $lines[] = info("Stale cache files cleared.");
+    $output = implode("\n", $lines);
+}
+
+// 6. Show Laravel error log
+elseif ($action === 'log') {
+    $logFile = ROOT . '/storage/logs/laravel.log';
+    if (!file_exists($logFile)) {
+        $output = info("No log file yet at storage/logs/laravel.log — visit /login first to trigger the error, then come back here.");
+    } else {
+        $content = file_get_contents($logFile);
+        // Get last ~6000 chars (most recent errors)
+        $content = substr($content, -6000);
+        $output = htmlspecialchars($content);
+    }
+}
+
+// 7. Show .env (passwords redacted)
+elseif ($action === 'showenv') {
+    $lines = [];
+    if (!file_exists(ENV_PATH)) {
+        $output = err(".env file not found");
+    } else {
+        foreach (file(ENV_PATH, FILE_IGNORE_NEW_LINES) as $line) {
+            // Redact passwords/keys
+            if (preg_match('/^(DB_PASSWORD|APP_KEY|MAIL_PASSWORD|AWS_SECRET)/i', $line)) {
+                $line = preg_replace('/=.+/', '=[REDACTED]', $line);
+            }
+            $lines[] = htmlspecialchars($line);
+        }
+        $output = implode("\n", $lines);
+    }
+}
+
+// 8. Clear cache only
 elseif ($action === 'cache') {
     $lines = [];
-    // We can't run artisan, but we can clear stale cache files
     $dirs = [
         ROOT . '/bootstrap/cache',
         ROOT . '/storage/framework/views',
@@ -268,7 +333,7 @@ elseif ($action === 'cache') {
         foreach (glob($dir . '/*.cache') ?: [] as $f) { @unlink($f); }
         $lines[] = ok("Cleared: " . basename($dir));
     }
-    $lines[] = info("Note: Laravel will rebuild cache on first request automatically.");
+    $lines[] = info("Laravel will rebuild cache automatically on next request.");
     $output = implode("\n", $lines);
 }
 
@@ -315,11 +380,14 @@ h1 { font-size: 22px; color: #c9a84c; margin-bottom: 4px; }
 
 <?php
 $steps = [
-    'info'    => ['1', 'Check Environment',         'Verify PHP, extensions, DB connection, and .env'],
-    'key'     => ['2', 'Generate APP_KEY',           'Write a fresh encryption key to your .env'],
-    'migrate' => ['3', 'Run Migrations',             'Create all database tables via raw SQL'],
-    'seed'    => ['4', 'Create Admin User',          'Insert admin@wedding.local / wedding2025'],
-    'cache'   => ['5', 'Clear Cache',                'Remove stale cache so Laravel starts fresh'],
+    'info'     => ['1', 'Check Environment',          'Verify PHP, extensions, DB connection, and .env'],
+    'key'      => ['2', 'Generate APP_KEY',            'Write a fresh encryption key to your .env'],
+    'migrate'  => ['3', 'Run Migrations',              'Create all database tables via raw SQL'],
+    'seed'     => ['4', 'Create Admin User',           'Insert admin@wedding.local / wedding2025'],
+    'fixperms' => ['5', 'Fix Permissions & Dirs',      'Create storage dirs, chmod 755, clear stale cache'],
+    'cache'    => ['6', 'Clear Cache',                 'Remove compiled cache files'],
+    'log'      => ['🔍', 'Show Error Log',             'Read storage/logs/laravel.log — use after a 500 error'],
+    'showenv'  => ['📄', 'Show .env (redacted)',       'Verify your .env values (passwords hidden)'],
 ];
 foreach ($steps as $act => [$num, $title, $desc]):
     $isActive = $action === $act;
